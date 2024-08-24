@@ -1,0 +1,107 @@
+---
+title: "Prediction of Catalogue Orders (R)"
+author: "Adela Dai"
+output: pdf_document
+---
+
+# Dataset
+The dataset `cat_buy.rda` contains data on the response of customers to the mailing of spring catalogues.  The variable `buytabw` is `1` if there is an order from this spring catalogue and `0` if not.  This is the dependent or response variable.  
+
+This spring catalogue was called a "tabloid" in the industry. The catalogue featured women's clothing and shoes. The independent variables represent information gathered from the internal `house file` of the past order activity of these 20,617 customers who received this catalogue.  
+
+In direct marketing, the predictor variables are typically of the "RFM" type: 1. Recency 2. Frequency and 3. Monetary value. This data set has both information on the volume of past orders as well as the recency of these orders. 
+
+The variables are:
+
+* tabordrs  (total orders from past tabloids) 
+
+* divsords  (total orders of shoes in past)  
+
+* divwords  (total orders of women's clothes in past)  
+
+* spgtabord (total orders from past spring cats)  
+
+* moslsdvs  (mos since last shoe order)  
+
+* moslsdvw  (mos since last women's clothes order)  
+
+* moslstab  (mos since last tabloid order)  
+
+* orders    (total orders) 
+
+## Randomly sample and divide data into two parts
+```{r}
+load('cat_buy.rda')
+
+obs = nrow(cat_buy)
+set.seed(10)
+ind.est = sample(1 : obs, obs / 2)
+
+est_sample = cat_buy[ind.est, ]
+holdout_sample = cat_buy[-ind.est, ]
+```
+
+## Fit a logistic regression model using the estimation sample
+First I run a logistic regression on all of the variables.
+```{r}
+lregB1 = glm(buytabw ~., data = est_sample, family = binomial)
+summary(lregB1)
+```
+Since `divsords` is insignificant, I remove the variable and fit a reduced model.
+
+```{r}
+lregB2 = glm(buytabw ~. - divsords, data = est_sample, family = binomial)
+summary(lregB2)
+```
+As AIC reduced, this model produced a better model fit.
+
+The fitted model suggests the following:
+
+* More orders increase probability of purchase (at least for `tabordrs`, `divwords`, and `spgtabord`). This is intuitive.
+
+* As time since last order increases, purchase probability decreases (`moslsdvs`, `moslsdvw`, `moslstab`). This is intuitive.
+
+* More total orders (orders) decreases the probability of purchase. This contradicts the first finding and is counter-intuitive.
+
+## Plot the correlation matrix and chart
+```{r}
+round(cor(est_sample), 2)
+```
+
+```{r}
+pairs(~ tabordrs + divwords + spgtabord + orders, data = est_sample, 
+      main = 'Correlations', col = '#2774AE')
+```
+
+The correlation matrix and plot show that there is correlation between some variables, e.g. `tabordrs` and `spgtabord`. However, this is not an issue as the correlation is not huge.
+
+## Use the best-fit to predict using the holdout sample  
+```{r}
+phat = predict(lregB2, new = holdout_sample, type = 'response')
+```
+
+## Plot boxplots of the fitted probabilities
+```{r}
+library(ggplot2)
+
+qplot(factor(holdout_sample$buytabw), phat, geom = 'boxplot', fill = I('#2774AE'), 
+      xlab = 'buytabw') +
+  ggtitle('Distribution of Fitted Probabilities by Buytabw') +
+  theme(axis.title = element_text(size = rel(1.5)), 
+        axis.text = element_text(size = rel(1.25)))
+```
+
+## Compute a "lift" table
+```{r}
+deciles = cut(phat, breaks = quantile(phat, probs = c(seq(from = 0, to = 1, by = .1))),
+              include.lowest = TRUE)
+deciles = as.numeric(deciles)
+
+df = data.frame(deciles = deciles, phat = phat, buytabw = holdout_sample$buytabw)
+
+lift = aggregate(df, by = list(deciles), FUN = 'mean', data = df)
+lift = lift[, c(2, 4)]
+lift[, 3] = lift[, 2] / mean(holdout_sample$buytabw)
+names(lift) = c('decile', 'Mean Response', 'Lift Factor')
+lift
+```
